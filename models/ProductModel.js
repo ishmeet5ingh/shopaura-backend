@@ -9,7 +9,6 @@ const productSchema = new mongoose.Schema({
   },
   slug: {
     type: String,
-    unique: true,
     lowercase: true,
     trim: true
   },
@@ -27,16 +26,25 @@ const productSchema = new mongoose.Schema({
     required: [true, 'Price is required'],
     min: [0, 'Price cannot be negative']
   },
-  discountPrice: {
-    type: Number,
-    min: [0, 'Discount price cannot be negative'],
-    validate: {
-      validator: function(value) {
-        return !value || value < this.price;
-      },
-      message: 'Discount price must be less than regular price'
-    }
-  },
+discountPrice: {
+  type: Number,
+  min: [0, 'Discount price cannot be negative'],
+  validate: {
+    validator: function (value) {
+      // Allow empty discount price
+      if (value == null) return true;
+
+      // On update, price may not be in this doc
+      const price = this.price ?? this.get('price');
+
+      // If price is missing, skip validation
+      if (price == null) return true;
+
+      return value < price;
+    },
+    message: 'Discount price must be less than regular price'
+  }
+},
   category: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Category',
@@ -68,13 +76,17 @@ const productSchema = new mongoose.Schema({
       required: true
     },
     public_id: {
-      type: String
+      type: String,
+      required: true
     },
     alt: String
   }],
   thumbnail: {
-    type: String,
-    default: 'https://via.placeholder.com/300'
+    url: {
+      type: String,
+      default: 'https://via.placeholder.com/300'
+    },
+    public_id: String
   },
   seller: {
     type: mongoose.Schema.Types.ObjectId,
@@ -185,10 +197,14 @@ productSchema.virtual('inStock').get(function() {
 // Generate slug from name before saving
 productSchema.pre('save', function() {
   if (this.isModified('name') && !this.slug) {
-    this.slug = this.name
+    const baseSlug = this.name
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '');
+    
+    // Add random suffix to make slug unique
+    const randomSuffix = Math.random().toString(36).substring(2, 8);
+    this.slug = `${baseSlug}-${randomSuffix}`;
   }
 });
 
@@ -200,6 +216,29 @@ productSchema.post('save', async function() {
     if (category) {
       await category.updateProductCount();
     }
+  }
+});
+
+// Delete images from Cloudinary when product is deleted
+productSchema.pre('deleteOne', { document: true, query: false }, async function() {
+  try {
+    const cloudinary = (await import('../config/cloudinary.js')).default;
+    
+    // Delete all product images
+    if (this.images && this.images.length > 0) {
+      for (const image of this.images) {
+        if (image.public_id) {
+          await cloudinary.uploader.destroy(image.public_id);
+        }
+      }
+    }
+    
+    // Delete thumbnail
+    if (this.thumbnail && this.thumbnail.public_id) {
+      await cloudinary.uploader.destroy(this.thumbnail.public_id);
+    }
+  } catch (error) {
+    console.error('Error deleting images from Cloudinary:', error);
   }
 });
 

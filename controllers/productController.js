@@ -1,5 +1,6 @@
 import Product from '../models/ProductModel.js';
 import Category from '../models/CategoryModel.js';
+import cloudinary from '../config/cloudinary.js';
 import mongoose from 'mongoose';
 
 // @desc    Get all products with filtering, sorting, pagination
@@ -11,57 +12,74 @@ export const getAllProducts = async (req, res) => {
     const limit = parseInt(req.query.limit) || 12;
     const skip = (page - 1) * limit;
 
-    // Build filter object
     const filter = { isActive: true };
 
-    // Search query
     if (req.query.search) {
       filter.$text = { $search: req.query.search };
     }
 
-    // Category filter
+    // ✅ FIX: Handle category by slug or ObjectId
     if (req.query.category) {
-      filter.category = req.query.category;
+      // Check if it's a valid ObjectId
+      if (mongoose.Types.ObjectId.isValid(req.query.category) && req.query.category.length === 24) {
+        filter.category = req.query.category;
+      } else {
+        // It's a slug, find the category first
+        const category = await Category.findOne({ slug: req.query.category });
+        if (category) {
+          filter.category = category._id;
+        } else {
+          // Category not found, return empty results
+          return res.status(200).json({
+            success: true,
+            count: 0,
+            total: 0,
+            page,
+            totalPages: 0,
+            products: []
+          });
+        }
+      }
     }
 
-    // Subcategory filter
+    // ✅ FIX: Handle subcategory by slug or ObjectId
     if (req.query.subcategory) {
-      filter.subcategory = req.query.subcategory;
+      if (mongoose.Types.ObjectId.isValid(req.query.subcategory) && req.query.subcategory.length === 24) {
+        filter.subcategory = req.query.subcategory;
+      } else {
+        const subcategory = await Category.findOne({ slug: req.query.subcategory });
+        if (subcategory) {
+          filter.subcategory = subcategory._id;
+        }
+      }
     }
 
-    // Brand filter
     if (req.query.brand) {
       filter.brand = req.query.brand;
     }
 
-    // Seller filter
     if (req.query.seller) {
       filter.seller = req.query.seller;
     }
 
-    // Price range filter
     if (req.query.minPrice || req.query.maxPrice) {
       filter.price = {};
       if (req.query.minPrice) filter.price.$gte = parseFloat(req.query.minPrice);
       if (req.query.maxPrice) filter.price.$lte = parseFloat(req.query.maxPrice);
     }
 
-    // Rating filter
     if (req.query.minRating) {
       filter.averageRating = { $gte: parseFloat(req.query.minRating) };
     }
 
-    // In stock filter
     if (req.query.inStock === 'true') {
       filter.stock = { $gt: 0 };
     }
 
-    // Featured filter
     if (req.query.isFeatured === 'true') {
       filter.isFeatured = true;
     }
 
-    // Sort options
     let sort = {};
     switch (req.query.sort) {
       case 'price_asc':
@@ -86,7 +104,6 @@ export const getAllProducts = async (req, res) => {
         sort.createdAt = -1;
     }
 
-    // Execute query
     const products = await Product.find(filter)
       .populate('seller', 'name email')
       .populate('category', 'name slug')
@@ -108,6 +125,7 @@ export const getAllProducts = async (req, res) => {
       products
     });
   } catch (error) {
+    console.error('Error in getAllProducts:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching products',
@@ -137,22 +155,30 @@ export const getProductByIdentifier = async (req, res) => {
       });
     }
 
-    // Populate references
+    // Populate product relationships
     await product.populate([
       { path: 'seller', select: 'name email avatar' },
       { path: 'category', select: 'name slug' },
       { path: 'subcategory', select: 'name slug' }
     ]);
 
-    // Increment views
-    product.views += 1;
-    await product.save();
+    // Increment views using atomic update (better performance) [web:12][web:15]
+    await Product.findByIdAndUpdate(product._id, { $inc: { views: 1 } });
+
+    // Prepare response
+    const responseData = product.toJSON();
+
+    // Add ishearted field ONLY for authenticated users
+    if (req.user && req.ishearted !== undefined) {
+      responseData.ishearted = req.ishearted;
+    }
 
     res.status(200).json({
       success: true,
-      product
+      product: responseData
     });
   } catch (error) {
+    console.error('Error in getProductByIdentifier:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching product',
@@ -161,17 +187,20 @@ export const getProductByIdentifier = async (req, res) => {
   }
 };
 
-// @desc    Create new product
+// @desc    Create new product with images
 // @route   POST /api/products
 // @access  Private (Seller, Admin)
 export const createProduct = async (req, res) => {
   try {
+    // Parse JSON data from request body
+    const productData = JSON.parse(req.body.data);
+    
     // Add seller ID from authenticated user
-    req.body.seller = req.user._id;
+    productData.seller = req.user._id;
 
     // Verify category exists
-    if (req.body.category) {
-      const categoryExists = await Category.findById(req.body.category);
+    if (productData.category) {
+      const categoryExists = await Category.findById(productData.category);
       if (!categoryExists) {
         return res.status(404).json({
           success: false,
@@ -181,8 +210,8 @@ export const createProduct = async (req, res) => {
     }
 
     // Verify subcategory exists if provided
-    if (req.body.subcategory) {
-      const subcategoryExists = await Category.findById(req.body.subcategory);
+    if (productData.subcategory) {
+      const subcategoryExists = await Category.findById(productData.subcategory);
       if (!subcategoryExists) {
         return res.status(404).json({
           success: false,
@@ -191,7 +220,44 @@ export const createProduct = async (req, res) => {
       }
     }
 
-    const product = await Product.create(req.body);
+    // Handle uploaded images
+    const images = [];
+    if (req.files && req.files.images) {
+      for (const file of req.files.images) {
+        images.push({
+          url: file.path,
+          public_id: file.filename,
+          alt: productData.name
+        });
+      }
+    }
+
+    // Handle thumbnail
+    let thumbnail = {
+      url: 'https://placehold.co/300x300?text=Product',
+      public_id: null
+    };
+    
+    if (req.files && req.files.thumbnail && req.files.thumbnail[0]) {
+      thumbnail = {
+        url: req.files.thumbnail[0].path,
+        public_id: req.files.thumbnail[0].filename
+      };
+    } else if (images.length > 0) {
+      // Use first image as thumbnail if not provided
+      thumbnail = {
+        url: images[0].url,
+        public_id: images[0].public_id
+      };
+    }
+
+    // Create product with uploaded images
+    const product = await Product.create({
+      ...productData,
+      images,
+      thumbnail
+    });
+
     await product.populate([
       { path: 'category', select: 'name slug' },
       { path: 'subcategory', select: 'name slug' }
@@ -203,6 +269,23 @@ export const createProduct = async (req, res) => {
       product
     });
   } catch (error) {
+    console.error('Error in createProduct:', error);
+    // If error occurs, delete uploaded images from Cloudinary
+    if (req.files) {
+      const allFiles = [
+        ...(req.files.images || []),
+        ...(req.files.thumbnail || [])
+      ];
+      
+      for (const file of allFiles) {
+        try {
+          await cloudinary.uploader.destroy(file.filename);
+        } catch (err) {
+          console.error('Error deleting file:', err);
+        }
+      }
+    }
+
     res.status(400).json({
       success: false,
       message: 'Error creating product',
@@ -233,12 +316,32 @@ export const updateProduct = async (req, res) => {
       });
     }
 
+    // Check if req.body.data exists
+    if (!req.body.data) {
+      return res.status(400).json({
+        success: false,
+        message: 'No product data provided. Send data in "data" field as JSON string.'
+      });
+    }
+
+    // Parse JSON data
+    let productData;
+    try {
+      productData = JSON.parse(req.body.data);
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid JSON in data field',
+        error: error.message
+      });
+    }
+
     // Prevent seller field update
-    delete req.body.seller;
+    delete productData.seller;
 
     // Verify category if being updated
-    if (req.body.category) {
-      const categoryExists = await Category.findById(req.body.category);
+    if (productData.category) {
+      const categoryExists = await Category.findById(productData.category);
       if (!categoryExists) {
         return res.status(404).json({
           success: false,
@@ -247,13 +350,80 @@ export const updateProduct = async (req, res) => {
       }
     }
 
+    // Handle new uploaded images
+    if (req.files && req.files.images) {
+      const newImages = [];
+      for (const file of req.files.images) {
+        newImages.push({
+          url: file.path,
+          public_id: file.filename,
+          alt: productData.name || product.name
+        });
+      }
+      
+      // Merge with existing images if keepExistingImages is true
+      if (productData.keepExistingImages && productData.existingImages) {
+        productData.images = [...productData.existingImages, ...newImages];
+      } else {
+        // Delete old images from Cloudinary
+        for (const image of product.images) {
+          if (image.public_id) {
+            try {
+              await cloudinary.uploader.destroy(image.public_id);
+            } catch (err) {
+              console.error('Error deleting old image:', err);
+            }
+          }
+        }
+        productData.images = newImages;
+      }
+    } else if (productData.existingImages) {
+      // Keep existing images if no new images uploaded
+      productData.images = productData.existingImages;
+    }
+
+    // Handle thumbnail update
+    if (req.files && req.files.thumbnail && req.files.thumbnail[0]) {
+      // Delete old thumbnail if exists
+      if (product.thumbnail && product.thumbnail.public_id) {
+        const isProductImage = product.images.some(img => img.public_id === product.thumbnail.public_id);
+        if (!isProductImage) {
+          try {
+            await cloudinary.uploader.destroy(product.thumbnail.public_id);
+          } catch (err) {
+            console.error('Error deleting old thumbnail:', err);
+          }
+        }
+      }
+
+      productData.thumbnail = {
+        url: req.files.thumbnail[0].path,
+        public_id: req.files.thumbnail[0].filename,
+        alt: productData.name || product.name
+      };
+    } else if (productData.existingThumbnail) {
+      productData.thumbnail = productData.existingThumbnail;
+    } else if (productData.images && productData.images.length > 0) {
+      productData.thumbnail = {
+        url: productData.images[0].url,
+        public_id: productData.images[0].public_id,
+        alt: productData.images[0].alt
+      };
+    }
+
+    // Clean up fields
+    delete productData.keepExistingImages;
+    delete productData.existingImages;
+    delete productData.existingThumbnail;
+
     product = await Product.findByIdAndUpdate(
       req.params.id,
-      req.body,
+      productData,
       { new: true, runValidators: true }
     ).populate([
       { path: 'category', select: 'name slug' },
-      { path: 'subcategory', select: 'name slug' }
+      { path: 'subcategory', select: 'name slug' },
+      { path: 'seller', select: 'name email' }
     ]);
 
     res.status(200).json({
@@ -262,6 +432,23 @@ export const updateProduct = async (req, res) => {
       product
     });
   } catch (error) {
+    console.error('Error in updateProduct:', error);
+    // Delete newly uploaded images on error
+    if (req.files) {
+      const allFiles = [
+        ...(req.files.images || []),
+        ...(req.files.thumbnail || [])
+      ];
+      
+      for (const file of allFiles) {
+        try {
+          await cloudinary.uploader.destroy(file.filename);
+        } catch (err) {
+          console.error('Error deleting file:', err);
+        }
+      }
+    }
+
     res.status(400).json({
       success: false,
       message: 'Error updating product',
@@ -299,6 +486,7 @@ export const deleteProduct = async (req, res) => {
       message: 'Product deleted successfully'
     });
   } catch (error) {
+    console.error('Error in deleteProduct:', error);
     res.status(500).json({
       success: false,
       message: 'Error deleting product',
@@ -338,6 +526,7 @@ export const getProductsBySeller = async (req, res) => {
       products
     });
   } catch (error) {
+    console.error('Error in getProductsBySeller:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching seller products',
@@ -377,6 +566,7 @@ export const getMyProducts = async (req, res) => {
       products
     });
   } catch (error) {
+    console.error('Error in getMyProducts:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching your products',
@@ -388,22 +578,55 @@ export const getMyProducts = async (req, res) => {
 // @desc    Get product statistics (Admin only)
 // @route   GET /api/products/admin/stats
 // @access  Private (Admin)
+// @desc    Get product statistics (Seller sees own, Admin sees all)
+// @route   GET /api/products/my/stats
+// @access  Private (Seller, Admin)
 export const getProductStats = async (req, res) => {
   try {
+    const userId = req.user._id;
+    const isAdmin = req.user.role === 'admin';
+
+    // ✅ FIXED: Filter by seller for non-admin users
+    const matchQuery = isAdmin ? {} : { seller: userId };
+
+    console.log('===== STATS DEBUG =====');
+    console.log('User ID:', userId);
+    console.log('User Role:', req.user.role);
+    console.log('Match Query:', matchQuery);
+
+    // Get overall statistics
     const stats = await Product.aggregate([
+      { $match: matchQuery }, // ← Add seller filter
       {
         $group: {
           _id: null,
           totalProducts: { $sum: 1 },
           activeProducts: { $sum: { $cond: ['$isActive', 1, 0] } },
+          inactiveProducts: { $sum: { $cond: ['$isActive', 0, 1] } },
           averagePrice: { $avg: '$price' },
           totalStock: { $sum: '$stock' },
-          totalSold: { $sum: '$soldCount' }
+          totalSold: { $sum: '$soldCount' },
+          lowStockCount: { 
+            $sum: { 
+              $cond: [
+                { $and: [{ $gt: ['$stock', 0] }, { $lt: ['$stock', 10] }] },
+                1,
+                0
+              ]
+            }
+          },
+          outOfStockCount: { 
+            $sum: { $cond: [{ $eq: ['$stock', 0] }, 1, 0] }
+          }
         }
       }
     ]);
 
+    console.log('Stats Result:', stats);
+
+    // Get category-wise statistics
     const categoryStats = await Product.aggregate([
+      { $match: matchQuery }, // ← Add seller filter
       {
         $lookup: {
           from: 'categories',
@@ -412,24 +635,50 @@ export const getProductStats = async (req, res) => {
           as: 'categoryInfo'
         }
       },
-      { $unwind: '$categoryInfo' },
+      { $unwind: { path: '$categoryInfo', preserveNullAndEmptyArrays: true } },
       {
         $group: {
           _id: '$category',
           name: { $first: '$categoryInfo.name' },
           count: { $sum: 1 },
-          averagePrice: { $avg: '$price' }
+          averagePrice: { $avg: '$price' },
+          totalStock: { $sum: '$stock' }
         }
       },
-      { $sort: { count: -1 } }
+      { $sort: { count: -1 } },
+      {
+        $project: {
+          _id: 0,
+          categoryId: '$_id',
+          name: { $ifNull: ['$name', 'Uncategorized'] },
+          count: 1,
+          averagePrice: { $round: ['$averagePrice', 2] },
+          totalStock: 1
+        }
+      }
     ]);
+
+    console.log('Category Stats:', categoryStats);
+    console.log('=======================');
+
+    const statsData = stats[0] || {
+      totalProducts: 0,
+      activeProducts: 0,
+      inactiveProducts: 0,
+      averagePrice: 0,
+      totalStock: 0,
+      totalSold: 0,
+      lowStockCount: 0,
+      outOfStockCount: 0
+    };
 
     res.status(200).json({
       success: true,
-      stats: stats[0] || {},
+      stats: statsData,
       categoryStats
     });
   } catch (error) {
+    console.error('Error in getProductStats:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching stats',
@@ -437,6 +686,7 @@ export const getProductStats = async (req, res) => {
     });
   }
 };
+
 
 // @desc    Toggle product active status
 // @route   PATCH /api/products/:id/toggle-status
@@ -469,6 +719,7 @@ export const toggleProductStatus = async (req, res) => {
       product
     });
   } catch (error) {
+    console.error('Error in toggleProductStatus:', error);
     res.status(500).json({
       success: false,
       message: 'Error toggling product status',

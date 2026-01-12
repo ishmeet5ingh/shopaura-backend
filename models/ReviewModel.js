@@ -90,7 +90,7 @@ reviewSchema.methods.unmarkHelpful = function(userId) {
   this.helpfulCount = this.helpful.length;
 };
 
-// Static method to calculate product rating
+// ✅ FIXED: Static method to calculate product rating and reviewCount
 reviewSchema.statics.calculateProductRating = async function(productId) {
   const stats = await this.aggregate([
     {
@@ -121,26 +121,40 @@ reviewSchema.statics.calculateProductRating = async function(productId) {
 
     await mongoose.model('Product').findByIdAndUpdate(productId, {
       averageRating: Math.round(stats[0].averageRating * 10) / 10,
-      numReviews: stats[0].numReviews,
+      reviewCount: stats[0].numReviews, // ✅ FIXED: Changed from numReviews to reviewCount
       ratingDistribution: distribution
     });
   } else {
     await mongoose.model('Product').findByIdAndUpdate(productId, {
       averageRating: 0,
-      numReviews: 0,
+      reviewCount: 0, // ✅ FIXED: Changed from numReviews to reviewCount
       ratingDistribution: { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 }
     });
   }
 };
 
-// Update product rating after save
-reviewSchema.post('save', function() {
-  this.constructor.calculateProductRating(this.product);
+// ✅ FIXED: Update product rating after save
+reviewSchema.post('save', async function() {
+  await this.constructor.calculateProductRating(this.product);
 });
 
-// Update product rating after remove
-reviewSchema.post('deleteOne', { document: true, query: false }, function() {
-  this.constructor.calculateProductRating(this.product);
+// ✅ FIXED: Update product rating after delete
+reviewSchema.post('deleteOne', { document: true, query: false }, async function() {
+  await this.constructor.calculateProductRating(this.product);
+});
+
+// ✅ NEW: Update product rating after findOneAndDelete
+reviewSchema.post('findOneAndDelete', async function(doc) {
+  if (doc) {
+    await doc.constructor.calculateProductRating(doc.product);
+  }
+});
+
+// ✅ NEW: Update product rating after findOneAndUpdate
+reviewSchema.post('findOneAndUpdate', async function(doc) {
+  if (doc) {
+    await doc.constructor.calculateProductRating(doc.product);
+  }
 });
 
 export default mongoose.model('Review', reviewSchema);

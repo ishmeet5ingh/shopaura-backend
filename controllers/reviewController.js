@@ -11,8 +11,24 @@ export const getProductReviews = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
+    // ✅ FIX: Handle both slug and ObjectId
+    let productId = req.params.productId;
+    
+    // Check if it's a slug instead of ObjectId
+    if (!mongoose.Types.ObjectId.isValid(productId) || productId.length !== 24) {
+      // It's a slug, find the product first
+      const product = await Product.findOne({ slug: productId });
+      if (!product) {
+        return res.status(404).json({
+          success: false,
+          message: 'Product not found'
+        });
+      }
+      productId = product._id;
+    }
+
     const filter = {
-      product: req.params.productId,
+      product: productId,
       status: 'approved',
       isActive: true
     };
@@ -61,7 +77,7 @@ export const getProductReviews = async (req, res) => {
     const ratingSummary = await Review.aggregate([
       {
         $match: {
-          product: new mongoose.Types.ObjectId(req.params.productId),
+          product: new mongoose.Types.ObjectId(productId),
           status: 'approved',
           isActive: true
         }
@@ -87,6 +103,7 @@ export const getProductReviews = async (req, res) => {
       reviews
     });
   } catch (error) {
+    console.error('Error in getProductReviews:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching reviews',
@@ -117,6 +134,7 @@ export const getReviewById = async (req, res) => {
       review
     });
   } catch (error) {
+    console.error('Error in getReviewById:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching review',
@@ -173,6 +191,7 @@ export const createReview = async (req, res) => {
       review
     });
   } catch (error) {
+    console.error('Error in createReview:', error);
     res.status(400).json({
       success: false,
       message: 'Error creating review',
@@ -217,6 +236,7 @@ export const updateReview = async (req, res) => {
       review
     });
   } catch (error) {
+    console.error('Error in updateReview:', error);
     res.status(400).json({
       success: false,
       message: 'Error updating review',
@@ -254,6 +274,7 @@ export const deleteReview = async (req, res) => {
       message: 'Review deleted successfully'
     });
   } catch (error) {
+    console.error('Error in deleteReview:', error);
     res.status(500).json({
       success: false,
       message: 'Error deleting review',
@@ -293,6 +314,7 @@ export const markReviewHelpful = async (req, res) => {
       helpfulCount: review.helpfulCount
     });
   } catch (error) {
+    console.error('Error in markReviewHelpful:', error);
     res.status(500).json({
       success: false,
       message: 'Error marking review as helpful',
@@ -324,6 +346,7 @@ export const unmarkReviewHelpful = async (req, res) => {
       helpfulCount: review.helpfulCount
     });
   } catch (error) {
+    console.error('Error in unmarkReviewHelpful:', error);
     res.status(500).json({
       success: false,
       message: 'Error unmarking review',
@@ -356,6 +379,7 @@ export const getMyReviews = async (req, res) => {
       reviews
     });
   } catch (error) {
+    console.error('Error in getMyReviews:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching your reviews',
@@ -404,6 +428,7 @@ export const addReviewResponse = async (req, res) => {
       review
     });
   } catch (error) {
+    console.error('Error in addReviewResponse:', error);
     res.status(400).json({
       success: false,
       message: 'Error adding response',
@@ -445,6 +470,7 @@ export const updateReviewStatus = async (req, res) => {
       review
     });
   } catch (error) {
+    console.error('Error in updateReviewStatus:', error);
     res.status(400).json({
       success: false,
       message: 'Error updating review status',
@@ -504,6 +530,7 @@ export const getAllReviews = async (req, res) => {
       reviews
     });
   } catch (error) {
+    console.error('Error in getAllReviews:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching reviews',

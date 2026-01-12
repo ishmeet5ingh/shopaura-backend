@@ -16,23 +16,31 @@ import { protect, restrictTo } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
-// Public routes
+// ✅ IMPORTANT: Specific routes BEFORE dynamic routes
+
+// Admin only routes - FIRST
+router.get('/admin/all', protect, restrictTo('admin'), getAllReviews);
+
+// User's own reviews - BEFORE /:id
+router.get('/my/reviews', protect, getMyReviews);
+
+// Product reviews - BEFORE /:id
 router.get('/product/:productId', getProductReviews);
-router.get('/:id', getReviewById);
 
 // Protected routes - All authenticated users
 router.post('/', protect, createReview);
+
+// Dynamic routes - AFTER specific routes
+router.get('/:id', getReviewById);
 router.put('/:id', protect, updateReview);
 router.delete('/:id', protect, deleteReview);
 router.post('/:id/helpful', protect, markReviewHelpful);
 router.delete('/:id/helpful', protect, unmarkReviewHelpful);
-router.get('/my/reviews', protect, getMyReviews);
 
 // Seller and Admin can respond to reviews
 router.post('/:id/response', protect, restrictTo('seller', 'admin'), addReviewResponse);
 
-// Admin only routes
-router.get('/admin/all', protect, restrictTo('admin'), getAllReviews);
+// Admin status update
 router.patch('/:id/status', protect, restrictTo('admin'), updateReviewStatus);
 
 export default router;

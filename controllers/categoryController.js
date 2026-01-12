@@ -1,5 +1,6 @@
 import Category from '../models/CategoryModel.js';
-import Product from '../models/ProductModel.js';
+import cloudinary from '../config/cloudinary.js';
+import ProductModel from '../models/ProductModel.js';
 
 // @desc    Get all categories
 // @route   GET /api/categories
@@ -12,29 +13,24 @@ export const getAllCategories = async (req, res) => {
 
     const filter = {};
 
-    // Active filter
     if (req.query.isActive !== undefined) {
       filter.isActive = req.query.isActive === 'true';
     } else {
-      filter.isActive = true; // Default show only active
+      filter.isActive = true;
     }
 
-    // Parent filter (get main categories or subcategories)
     if (req.query.parent) {
       filter.parent = req.query.parent === 'null' ? null : req.query.parent;
     }
 
-    // Level filter
     if (req.query.level !== undefined) {
       filter.level = parseInt(req.query.level);
     }
 
-    // Featured filter
     if (req.query.isFeatured === 'true') {
       filter.isFeatured = true;
     }
 
-    // Search filter
     if (req.query.search) {
       filter.$text = { $search: req.query.search };
     }
@@ -65,7 +61,7 @@ export const getAllCategories = async (req, res) => {
   }
 };
 
-// @desc    Get category tree (hierarchical structure)
+// @desc    Get category tree
 // @route   GET /api/categories/tree
 // @access  Public
 export const getCategoryTree = async (req, res) => {
@@ -92,14 +88,11 @@ export const getCategoryByIdentifier = async (req, res) => {
   try {
     const { identifier } = req.params;
     
-    // Check if identifier is ObjectId or slug
     let category;
     if (identifier.match(/^[0-9a-fA-F]{24}$/)) {
-      // It's an ObjectId
       category = await Category.findById(identifier)
         .populate('parent', 'name slug');
     } else {
-      // It's a slug
       category = await Category.findOne({ slug: identifier })
         .populate('parent', 'name slug');
     }
@@ -111,13 +104,11 @@ export const getCategoryByIdentifier = async (req, res) => {
       });
     }
 
-    // Get subcategories
     const subcategories = await Category.find({ 
       parent: category._id,
       isActive: true 
     }).sort({ order: 1, name: 1 });
 
-    // Get category path
     const path = await category.getPath();
 
     res.status(200).json({
@@ -137,17 +128,17 @@ export const getCategoryByIdentifier = async (req, res) => {
   }
 };
 
-// @desc    Create new category
+// @desc    Create new category with image
 // @route   POST /api/categories
 // @access  Private (Admin)
 export const createCategory = async (req, res) => {
   try {
-    const { name, description, parent, image, icon, order, isFeatured, meta } = req.body;
+    const categoryData = JSON.parse(req.body.data);
 
     // Calculate level based on parent
     let level = 0;
-    if (parent) {
-      const parentCategory = await Category.findById(parent);
+    if (categoryData.parent) {
+      const parentCategory = await Category.findById(categoryData.parent);
       if (!parentCategory) {
         return res.status(404).json({
           success: false,
@@ -157,16 +148,18 @@ export const createCategory = async (req, res) => {
       level = parentCategory.level + 1;
     }
 
+    // Handle uploaded image
+    if (req.file) {
+      categoryData.image = {
+        url: req.file.path,
+        public_id: req.file.filename
+      };
+    }
+
     const category = await Category.create({
-      name,
-      description,
-      parent: parent || null,
-      level,
-      image,
-      icon,
-      order,
-      isFeatured,
-      meta
+      ...categoryData,
+      parent: categoryData.parent || null,
+      level
     });
 
     res.status(201).json({
@@ -175,6 +168,15 @@ export const createCategory = async (req, res) => {
       category
     });
   } catch (error) {
+    // Delete uploaded image if error occurs
+    if (req.file) {
+      try {
+        await cloudinary.uploader.destroy(req.file.filename);
+      } catch (err) {
+        console.error('Error deleting file:', err);
+      }
+    }
+
     res.status(400).json({
       success: false,
       message: 'Error creating category',
@@ -197,25 +199,44 @@ export const updateCategory = async (req, res) => {
       });
     }
 
+    const categoryData = JSON.parse(req.body.data);
+
     // If parent is being updated, recalculate level
-    if (req.body.parent !== undefined) {
-      if (req.body.parent) {
-        const parentCategory = await Category.findById(req.body.parent);
+    if (categoryData.parent !== undefined) {
+      if (categoryData.parent) {
+        const parentCategory = await Category.findById(categoryData.parent);
         if (!parentCategory) {
           return res.status(404).json({
             success: false,
             message: 'Parent category not found'
           });
         }
-        req.body.level = parentCategory.level + 1;
+        categoryData.level = parentCategory.level + 1;
       } else {
-        req.body.level = 0;
+        categoryData.level = 0;
       }
+    }
+
+    // Handle new uploaded image
+    if (req.file) {
+      // Delete old image from Cloudinary
+      if (category.image && category.image.public_id) {
+        try {
+          await cloudinary.uploader.destroy(category.image.public_id);
+        } catch (err) {
+          console.error('Error deleting old image:', err);
+        }
+      }
+
+      categoryData.image = {
+        url: req.file.path,
+        public_id: req.file.filename
+      };
     }
 
     category = await Category.findByIdAndUpdate(
       req.params.id,
-      req.body,
+      categoryData,
       { new: true, runValidators: true }
     ).populate('parent', 'name slug');
 
@@ -225,6 +246,15 @@ export const updateCategory = async (req, res) => {
       category
     });
   } catch (error) {
+    // Delete uploaded image if error occurs
+    if (req.file) {
+      try {
+        await cloudinary.uploader.destroy(req.file.filename);
+      } catch (err) {
+        console.error('Error deleting file:', err);
+      }
+    }
+
     res.status(400).json({
       success: false,
       message: 'Error updating category',
@@ -247,7 +277,6 @@ export const deleteCategory = async (req, res) => {
       });
     }
 
-    // Check if category has subcategories
     const subcategoriesCount = await Category.countDocuments({ parent: category._id });
     if (subcategoriesCount > 0) {
       return res.status(400).json({
@@ -256,7 +285,6 @@ export const deleteCategory = async (req, res) => {
       });
     }
 
-    // Check if category has products
     if (category.productCount > 0) {
       return res.status(400).json({
         success: false,
@@ -328,7 +356,8 @@ export const getCategoryWithProducts = async (req, res) => {
     const limit = parseInt(req.query.limit) || 12;
     const skip = (page - 1) * limit;
 
-    const products = await Product.find({
+
+    const products = await ProductModel.find({
       category: category._id,
       isActive: true
     })
@@ -397,7 +426,7 @@ export const updateCategoryProductCount = async (req, res) => {
 // @access  Private (Admin)
 export const reorderCategories = async (req, res) => {
   try {
-    const { categories } = req.body; // Array of { id, order }
+    const { categories } = req.body;
 
     if (!Array.isArray(categories)) {
       return res.status(400).json({
@@ -425,7 +454,7 @@ export const reorderCategories = async (req, res) => {
   }
 };
 
-// @desc    Get category statistics (Admin only)
+// @desc    Get category statistics
 // @route   GET /api/categories/admin/stats
 // @access  Private (Admin)
 export const getCategoryStats = async (req, res) => {
@@ -435,7 +464,6 @@ export const getCategoryStats = async (req, res) => {
     const mainCategories = await Category.countDocuments({ level: 0 });
     const subcategories = await Category.countDocuments({ level: { $gt: 0 } });
 
-    // Top categories by product count
     const topCategories = await Category.find({ isActive: true })
       .sort({ productCount: -1 })
       .limit(10)
