@@ -265,9 +265,13 @@ export const clearCart = async (req, res) => {
     let cart = await Cart.findOne({ user: req.user._id });
 
     if (!cart) {
-      return res.status(404).json({
-        success: false,
-        message: 'Cart not found'
+      // ✅ Create empty cart if it doesn't exist instead of returning 404
+      cart = await Cart.create({ user: req.user._id, items: [] });
+      
+      return res.status(200).json({
+        success: true,
+        message: 'Cart already empty',
+        data: cart
       });
     }
 

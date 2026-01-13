@@ -20,6 +20,20 @@ const userSchema = new mongoose.Schema(
         "Please enter a valid email",
       ],
     },
+    phone: {
+      type: String,
+      trim: true,
+      match: [/^[0-9]{10}$/, "Please enter a valid 10-digit phone number"],
+    },
+    profilePicture: {
+      publicId: String,
+      url: String,
+    },
+    dateOfBirth: Date,
+    gender: {
+      type: String,
+      enum: ["male", "female", "other"],
+    },
     password: {
       type: String,
       required: [true, "Password is required"],
@@ -31,7 +45,7 @@ const userSchema = new mongoose.Schema(
       enum: ["buyer", "seller", "admin"],
       default: "buyer",
     },
-   
+
     avatar: {
       type: String,
       default: "https://via.placeholder.com/150",

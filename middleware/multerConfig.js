@@ -43,6 +43,19 @@ const reviewStorage = new CloudinaryStorage({
   },
 });
 
+// Storage configuration for profile pictures (NEW)
+const profileStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: `${process.env.CLOUDINARY_FOLDER}/profiles`,
+    allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
+    transformation: [
+      { width: 400, height: 400, crop: 'fill', gravity: 'face' },
+      { quality: 'auto' }
+    ],
+  },
+});
+
 // File filter for images only
 const fileFilter = (req, file, cb) => {
   const allowedTypes = /jpeg|jpg|png|webp|gif/;
@@ -78,5 +91,14 @@ export const uploadReviewImages = multer({
   fileFilter: fileFilter,
   limits: {
     fileSize: 3 * 1024 * 1024, // 3MB limit
+  },
+});
+
+// Generic upload for profile pictures and other general uploads (NEW)
+export const upload = multer({
+  storage: profileStorage,
+  fileFilter: fileFilter,
+  limits: {
+    fileSize: 2 * 1024 * 1024, // 2MB limit
   },
 });

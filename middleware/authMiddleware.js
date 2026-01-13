@@ -1,6 +1,8 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/UserModel.js';
 
+
+
 // Protect routes - verify JWT token
 export const protect = async (req, res, next) => {
   try {
@@ -66,4 +68,15 @@ export const restrictTo = (...roles) => {
     }
     next();
   };
+};
+
+export const buyerOnly = (req, res, next) => {
+  if (req.user.role !== 'buyer') {
+    return res.status(403).json({
+      success: false,
+      message: 'Access denied. This section is for buyers only.',
+      redirectTo: process.env.ADMIN_PANEL_URL || 'http://localhost:5174'
+    });
+  }
+  next();
 };
