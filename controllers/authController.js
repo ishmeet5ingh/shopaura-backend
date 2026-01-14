@@ -186,6 +186,7 @@ export const login = async (req, res) => {
 // @access  Private
 export const logout = async (req, res) => {
   try {
+
     res.cookie('token', 'none', {
       expires: new Date(Date.now() + 10 * 1000),
       httpOnly: true,

@@ -36,7 +36,8 @@ const httpServer = createServer(app);
 const corsOptions = {
   origin: [
     'http://localhost:5173',        // Frontend
-    'http://localhost:5174',        // Admin panel
+    'http://localhost:5174',    
+    'http://192.168.1.10:5173',    // Admin panel
     process.env.FRONTEND_URL,
     process.env.ADMIN_PANEL_URL
   ].filter(Boolean),
