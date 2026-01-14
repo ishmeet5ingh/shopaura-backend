@@ -45,7 +45,6 @@ const userSchema = new mongoose.Schema(
       enum: ["buyer", "seller", "admin"],
       default: "buyer",
     },
-
     avatar: {
       type: String,
       default: "https://via.placeholder.com/150",
@@ -62,14 +61,12 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-// Hash password before saving - FIXED VERSION WITHOUT next()
+// Hash password before saving
 userSchema.pre("save", async function () {
-  // Only hash if password is modified
   if (!this.isModified("password")) {
     return;
   }
 
-  // Hash password
   const salt = await bcrypt.genSalt(12);
   this.password = await bcrypt.hash(this.password, salt);
 });

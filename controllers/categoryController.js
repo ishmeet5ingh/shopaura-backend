@@ -488,3 +488,65 @@ export const getCategoryStats = async (req, res) => {
     });
   }
 };
+export const getCategoryWithProductsByIdentifier = async (req, res) => {
+  try {
+    const { identifier } = req.params;
+    const { sort = 'newest', page = 1, limit = 12 } = req.query;
+
+    // Resolve category by id or slug
+    let category;
+    if (identifier.match(/^[0-9a-fA-F]{24}$/)) {
+      category = await Category.findById(identifier);
+    } else {
+      category = await Category.findOne({ slug: identifier });
+    }
+
+    if (!category) {
+      return res.status(404).json({
+        success: false,
+        message: 'Category not found'
+      });
+    }
+
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 12;
+    const skip = (pageNum - 1) * limitNum;
+
+    // Sort option mapping
+    let sortOption = { createdAt: -1 };
+    if (sort === 'price-low') sortOption = { price: 1 };
+    if (sort === 'price-high') sortOption = { price: -1 };
+    if (sort === 'rating') sortOption = { averageRating: -1 };
+
+    const products = await ProductModel.find({
+      category: category._id,
+      isActive: true
+    })
+      .populate('seller', 'name')
+      .sort(sortOption)
+      .limit(limitNum)
+      .skip(skip);
+
+    const totalProducts = await ProductModel.countDocuments({
+      category: category._id,
+      isActive: true
+    });
+
+    return res.status(200).json({
+      success: true,
+      category,
+      products,
+      total: totalProducts,
+      page: pageNum,
+      totalPages: Math.ceil(totalProducts / limitNum)
+    });
+  } catch (error) {
+    console.error('Error fetching category products by identifier:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error fetching category products',
+      error: error.message
+    });
+  }
+};
+

@@ -63,20 +63,11 @@ export const updateProfile = async (req, res) => {
 
     await user.save();
 
+    // Return full user object (password removed by toJSON)
     res.status(200).json({
       success: true,
       message: 'Profile updated successfully',
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        dateOfBirth: user.dateOfBirth,
-        gender: user.gender,
-        profilePicture: user.profilePicture,
-        role: user.role,
-        avatar: user.avatar
-      }
+      user: user,
     });
   } catch (error) {
     res.status(500).json({
@@ -123,7 +114,7 @@ export const uploadProfilePicture = async (req, res) => {
     res.status(200).json({
       success: true,
       message: 'Profile picture uploaded successfully',
-      profilePicture: user.profilePicture
+      user: user,
     });
   } catch (error) {
     res.status(500).json({
@@ -157,7 +148,8 @@ export const deleteProfilePicture = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: 'Profile picture deleted successfully'
+      message: 'Profile picture deleted successfully',
+      user: user,
     });
   } catch (error) {
     res.status(500).json({

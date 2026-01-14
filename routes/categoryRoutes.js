@@ -8,6 +8,7 @@ import {
   deleteCategory,
   toggleCategoryStatus,
   getCategoryWithProducts,
+  getCategoryWithProductsByIdentifier, // NEW
   updateCategoryProductCount,
   reorderCategories,
   getCategoryStats
@@ -20,7 +21,13 @@ const router = express.Router();
 // Public routes
 router.get('/', getAllCategories);
 router.get('/tree', getCategoryTree);
+
+// NEW: products by identifier (id or slug) – placed BEFORE generic :identifier route
+router.get('/:identifier/products', getCategoryWithProductsByIdentifier);
+
 router.get('/:identifier', getCategoryByIdentifier);
+
+// existing id-based products route kept intact
 router.get('/:id/products', getCategoryWithProducts);
 
 // Admin only routes
