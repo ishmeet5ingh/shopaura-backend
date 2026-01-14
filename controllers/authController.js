@@ -120,7 +120,7 @@ export const register = async (req, res) => {
 // @access  Public
 export const login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, isBuyerFrontend } = req.body;
 
     console.log('🔐 Login attempt:', email);
 
@@ -159,9 +159,9 @@ export const login = async (req, res) => {
       });
     }
 
-    // IMPORTANT: Block sellers and admins from buyer frontend
-    if (['seller', 'admin'].includes(user.role)) {
-      console.log('🚫 Seller/Admin login blocked:', user.email);
+    // IMPORTANT: Block sellers and admins ONLY if request is from buyer frontend
+    if (isBuyerFrontend && ['seller', 'admin'].includes(user.role)) {
+      console.log('🚫 Seller/Admin login blocked on buyer frontend:', user.email);
       return res.status(403).json({
         success: false,
         message: 'Sellers and admins cannot access the buyer frontend. Please use the admin panel.',
@@ -179,6 +179,7 @@ export const login = async (req, res) => {
     });
   }
 };
+
 
 // @desc    Logout user / Clear cookie
 // @route   POST /api/auth/logout
